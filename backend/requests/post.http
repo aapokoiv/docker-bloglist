@@ -1,0 +1,27 @@
+# @import ./login.http
+
+### valid post
+# @forceRef login
+POST http://localhost:3003/api/blogs
+Content-Type: application/json
+Authorization: Bearer {{login.token}}
+
+{
+  "title": "First",
+  "author": "Me",
+  "url": "https://chatgpt.com/",
+  "likes": 420
+}
+
+### 2nd valid post for same user
+# @forceRef login
+POST http://localhost:3003/api/blogs
+Content-Type: application/json
+Authorization: Bearer {{login.token}}
+
+{
+  "title": "Second",
+  "author": "Me",
+  "url": "https://fullstackopen.com/en/",
+  "likes": 13
+}

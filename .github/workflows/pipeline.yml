@@ -1,0 +1,176 @@
+name: Deployment pipeline
+
+on:
+  push:
+    branches:
+      - xmain
+  pull_request:
+    branches: [xmain]
+    types: [opened, synchronize]
+
+jobs:
+  build_and_test:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24.19.0'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Use npm 11.17.0
+        run: npm install --global npm@11.17.0
+
+      - name: Show Node and npm versions
+        run: |
+          node --version
+          npm --version
+
+      - name: Install root dependencies
+        run: npm ci
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+      - name: Install frontend dependencies
+        run: npm ci --prefix frontend
+      - name: Check formatting
+        run: npm run format:check
+      - name: Lint frontend
+        run: npm run lint --prefix frontend
+      - name: Test backend
+        run: npm test --prefix backend
+        env:
+          TEST_MONGODB_URI: mongodb://localhost:27017/bloglist-test
+          SECRET: ci-test-secret
+      - name: Test frontend
+        run: npm test --prefix frontend
+      - name: Build frontend
+        run: npm run build
+
+  end_to_end_tests:
+    runs-on: ubuntu-latest
+    services:
+      mongodb:
+        image: mongo:8
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+            frontend/package-lock.json
+            e2e-testing/package-lock.json
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix backend
+          npm ci --prefix frontend
+          npm ci --prefix e2e-testing
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: e2e-testing
+      - name: Run Playwright tests
+        run: >-
+          npx concurrently --kill-others --success first
+          "npm run start:test --prefix backend"
+          "npm run dev --prefix frontend -- --host 0.0.0.0"
+          "npm test --prefix e2e-testing"
+        env:
+          TEST_MONGODB_URI: mongodb://localhost:27017/bloglist-e2e
+          SECRET: ci-test-secret
+
+  deploy:
+    needs: [build_and_test, end_to_end_tests]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deployment
+        run: curl --fail-with-body ${{ secrets.RENDER_DEPLOY_HOOK }}
+
+  notify_success:
+    needs: deploy
+    if: needs.deploy.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord of success
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          status: success
+          title: 'Deployment successful'
+          description: |
+            **Commit**: `${{ github.sha }}`
+            **Message:** `${{ github.event.head_commit.message }}`
+            **Author:** `${{ github.actor }}`
+          url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+  notify_failure:
+    needs: [build_and_test, end_to_end_tests, deploy]
+    if: ${{ always() && (needs.build_and_test.result == 'failure' || needs.end_to_end_tests.result == 'failure' || needs.deploy.result == 'failure') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify Discord of failure
+        uses: sarisia/actions-status-discord@v1
+        with:
+          webhook: ${{ secrets.DISCORD_WEBHOOK }}
+          status: failure
+          title: 'Deployment failed'
+          description: |
+            **Repository:** `${{ github.repository }}`.
+            **Branch:** `${{ github.ref_name }}`
+            **Commit:** `${{ github.sha }}`
+            **Message:** `${{ github.event.head_commit.message }}`
+            **Author:** `${{ github.actor }}`
+            **Workflow:** `${{ github.workflow }}`
+            **Job:** `${{
+              needs.build_and_test.result == 'failure' && 'build_and_test' ||
+              needs.end_to_end_tests.result == 'failure' && 'end_to_end_tests' ||
+              needs.deploy.result == 'failure' && 'deploy' ||
+              'unknown'
+            }}`
+
+            [View commit](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }})
+            [View workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
+          url: '${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}'
+
+  tag_release:
+    needs: [deploy]
+    if: >-
+      github.event_name == 'push' &&
+      !contains(github.event.head_commit.message, '#skip')
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Bump version and push tag
+        uses: anothrNick/github-tag-action@1.75.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEFAULT_BUMP: patch

@@ -1,0 +1,7 @@
+# @import ./login.http
+
+### delete aapeli post
+# @forceRef login
+DELETE http://localhost:3003/api/blogs/6a22f5bb0e018fc3b40432fb
+Content-Type: application/json
+Authorization: Bearer {{login.token}}

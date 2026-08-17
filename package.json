@@ -1,0 +1,14 @@
+{
+  "scripts": {
+    "build": "npm run build --prefix frontend",
+    "start": "NODE_ENV=production npm start --prefix backend",
+    "format": "prettier . --write",
+    "format:check": "prettier . --check"
+  },
+  "devDependencies": {
+    "concurrently": "^8.0.0"
+  },
+  "dependencies": {
+    "prettier": "^3.8.4"
+  }
+}
