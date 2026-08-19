@@ -15,9 +15,6 @@ services:
     build:
       context: frontend/
       dockerfile: Dockerfile
-    volumes:
-      - ./frontend:/usr/src/app
-      - /usr/src/app/node_modules
     container_name: bloglist-front
 
   server:
@@ -25,13 +22,11 @@ services:
     build:
       context: backend/
       dockerfile: Dockerfile
-    volumes:
-      - ./backend:/usr/src/app
-      - /usr/src/app/node_modules
     container_name: bloglist-backend
     environment:
       - REDIS_URL=redis://redis:6379
       - MONGODB_URI=${MONGODB_URI}
+      - SECRET=${SECRET}
     depends_on:
       - redis
 
